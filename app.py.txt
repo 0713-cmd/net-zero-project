@@ -1,0 +1,136 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import os
+
+# 1. 페이지 설정
+st.set_page_config(page_title="COWAY Net-Zero Dashboard", page_icon="🌿", layout="wide")
+st.markdown("""
+<style>
+    .stApp { background-color: #0E1117; color: #FAFAFA; font-family: 'Suit', sans-serif; }
+    .info-box { background-color: #1F252E; border: 1px solid #30363D; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .box-title { color: #2BD6B4; font-size: 18px; font-weight: bold; margin-bottom: 10px; }
+    .box-content { color: #E6E6E6; font-size: 16px; line-height: 1.6; white-space: pre-line; }
+    [data-testid="stStatusWidget"] { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
+# 2. 데이터 로드 (무조건 data.csv 읽기)
+@st.cache_data(show_spinner=False)
+def load_data():
+    if not os.path.exists('data.csv'):
+        return None
+    try:
+        return pd.read_csv('data.csv', header=None, encoding='utf-8')
+    except:
+        return pd.read_csv('data.csv', header=None, encoding='cp949')
+
+df_raw = load_data()
+
+if df_raw is None:
+    st.error("🚨 'data.csv' 파일을 찾을 수 없습니다. GitHub에 파일이 올라갔는지 확인해주세요.")
+    st.stop()
+
+# 3. 데이터 매핑 (엑셀 행번호 그대로 적용)
+# 연도: 2행(Index 1)에서 숫자만 추출 (2023~2050)
+years_row = df_raw.iloc[1, :].tolist()
+valid_indices = []
+years = []
+for i, val in enumerate(years_row):
+    s = str(val).replace('.0', '').replace(',', '')
+    if s.isdigit() and 2023 <= int(s) <= 2050:
+        valid_indices.append(i)
+        years.append(s)
+
+# 데이터 추출 함수
+def get_vals(row_idx): # 엑셀 행번호 넣으면 됨
+    if row_idx-1 >= len(df_raw): return [0]*len(years)
+    raw = df_raw.iloc[row_idx-1, valid_indices].tolist()
+    clean = []
+    for v in raw:
+        try: clean.append(float(str(v).replace(',', '')))
+        except: clean.append(0.0)
+    return clean
+
+def get_text(row_idx):
+    if row_idx-1 >= len(df_raw): return [""]*len(years)
+    return [str(v) if str(v) != 'nan' else "" for v in df_raw.iloc[row_idx-1, valid_indices].tolist()]
+
+def get_title(row_idx):
+    return str(df_raw.iloc[row_idx-1, 0])
+
+# 데이터 준비
+title1 = get_title(1)
+expected = get_vals(4) # 4행 예상배출량
+target = get_vals(3)   # 3행 목표배출량
+inv_red = get_vals(6)  # 6행 투자감축량
+rec_red = get_vals(7)  # 7행 REC감축량
+
+title2 = get_title(8)
+g2_rows = range(10, 15) # 10~14행
+g2_labels = [str(df_raw.iloc[r-1, 0]) for r in g2_rows]
+g2_data = [get_vals(r) for r in g2_rows]
+
+title3 = get_title(16)
+g3_rows = range(17, 22) # 17~21행
+g3_labels = [str(df_raw.iloc[r-1, 0]) for r in g3_rows]
+g3_data = [get_vals(r) for r in g3_rows]
+
+box1 = get_text(15)
+box2 = get_text(23)
+
+ft1 = get_title(40) if len(df_raw) >= 40 else ""
+fc1 = get_title(41) if len(df_raw) >= 41 else "" # 엑셀 41행을 내용으로
+ft2 = get_title(42) if len(df_raw) >= 42 else ""
+fc2 = get_title(43) if len(df_raw) >= 43 else "" 
+
+# 4. 시각화
+st.title("COWAY Net-Zero Roadmap Dashboard")
+
+# 그래프 1
+st.subheader(f"1. {title1}")
+fig1 = go.Figure()
+fig1.add_trace(go.Scatter(x=years, y=expected, name='예상 배출량', line=dict(color='#8B949E', width=2, dash='dash')))
+fig1.add_trace(go.Scatter(x=years, y=target, name='목표 배출량', line=dict(color='#2BD6B4', width=4)))
+fig1.add_trace(go.Bar(x=years, y=inv_red, name='투자 감축량', marker_color='#1E90FF'))
+fig1.add_trace(go.Bar(x=years, y=rec_red, name='REC 감축량', marker_color='#FFD700'))
+fig1.update_layout(template="plotly_dark", barmode='stack', height=500, hovermode="x unified")
+st.plotly_chart(fig1, use_container_width=True)
+
+# 그래프 2
+st.markdown("---")
+st.subheader(f"2. {title2}")
+fig2 = go.Figure()
+colors = px.colors.qualitative.Pastel
+for i, l in enumerate(g2_labels):
+    fig2.add_trace(go.Bar(x=years, y=g2_data[i], name=l, marker_color=colors[i%len(colors)]))
+fig2.update_layout(template="plotly_dark", barmode='stack', height=500, hovermode="x unified")
+st.plotly_chart(fig2, use_container_width=True)
+
+# 그래프 3
+st.markdown("---")
+st.subheader(f"3. {title3}")
+fig3 = go.Figure()
+for i, l in enumerate(g3_labels):
+    fig3.add_trace(go.Bar(x=years, y=g3_data[i], name=l))
+fig3.update_layout(template="plotly_dark", barmode='group', height=500, hovermode="x unified")
+st.plotly_chart(fig3, use_container_width=True)
+
+# 박스 영역
+st.markdown("---")
+st.subheader("📅 연도별 상세 분석")
+sel_year = st.select_slider("연도 선택", options=years, value="2030")
+idx = years.index(sel_year)
+
+c1, c2 = st.columns(2)
+with c1: st.markdown(f'<div class="info-box"><div class="box-title">📌 {sel_year}년 이슈</div><div class="box-content">{box1[idx]}</div></div>', unsafe_allow_html=True)
+with c2: st.markdown(f'<div class="info-box"><div class="box-title">💰 {sel_year}년 투자</div><div class="box-content">{box2[idx]}</div></div>', unsafe_allow_html=True)
+
+# 하단 용어
+st.markdown("---")
+f1, f2 = st.columns(2)
+with f1: 
+    if ft1: st.info(f"**{ft1}**\n\n{fc1}")
+with f2:
+    if ft2: st.info(f"**{ft2}**\n\n{fc2}")
